@@ -1,0 +1,5 @@
+myhostname = smtp.local
+mydestination = localhost
+mynetworks = 127.0.0.0/8
+mail_spool_directory = /var/spool/mail
+local_recipient_maps =

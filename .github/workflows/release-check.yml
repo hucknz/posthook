@@ -1,0 +1,71 @@
+name: Check for new Postfix release
+
+on:
+  schedule:
+    - cron: '15 3 * * *'  # Runs daily at 03:15 UTC
+  workflow_dispatch:
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get current version number
+        run: |
+          CURRENT_VERSION=$(cat upstream-releases/postfix-latest.txt 2>/dev/null || echo "0.0.0")
+          echo "CURRENT_VERSION=$CURRENT_VERSION" >> $GITHUB_ENV
+
+      - name: Get latest version number from Debian repository
+        run: |
+          RELEASE_DATA=$(curl -sL "http://ftp.debian.org/debian/pool/main/p/postfix/")
+          NEW_VERSION=$(echo "$RELEASE_DATA" | grep -oP 'postfix_\K[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -1)
+          echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
+
+      - name: Compare version numbers
+        run: |
+          if [ -z "${{ env.NEW_VERSION }}" ]; then
+            echo "Failed to fetch latest version. Skipping update."
+            echo "MODIFIED=false" >> $GITHUB_ENV
+          elif [ "${{ env.CURRENT_VERSION }}" = "${{ env.NEW_VERSION }}" ]; then
+            echo "No new release found."
+            echo "MODIFIED=false" >> $GITHUB_ENV
+          else
+            echo "New Postfix release found: ${{ env.NEW_VERSION }}"
+            echo "${{ env.NEW_VERSION }}" > upstream-releases/postfix-latest.txt
+            curl -X POST \
+              -H "Accept: application/vnd.github.v3+json" \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              https://api.github.com/repos/hucknz/postfix-docker/actions/workflows/build-and-push.yml/dispatches \
+              -d '{"ref":"main"}'
+            echo "MODIFIED=true" >> $GITHUB_ENV
+
+      - name: Commit latest version
+        if: env.MODIFIED == 'true'
+        run: |
+          git config --global user.name 'hucknz'
+          git config --global user.email '12265772+hucknz@users.noreply.github.com'
+          git commit -am "New Postfix release found: ${{ env.NEW_VERSION }}"
+          git push
+
+      - name: Notify new release
+        if: env.MODIFIED == 'true'
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK }}
+          noprefix: true
+          status: success
+          title: "New Postfix Release Found!"
+          description: "A new version (v${{ env.NEW_VERSION }}) has been detected. The build-and-push workflow has been triggered."
+
+      - name: Notify failure
+        if: failure()
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK }}
+          noprefix: true
+          status: failure
+          title: "Postfix Release Check Failed"
