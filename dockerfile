@@ -143,7 +143,7 @@ myhostname = mail.example.com
 mydomain = example.com
 myorigin = $mydomain
 mydestination = $myhostname, localhost.$mydomain, localhost, $mydomain
-mynetworks = 127.0.0.0/8 [::ffff:127.0.0.0]/104 [::1]/128 172.0.0.0/8 10.0.0.0/8 192.168.0.0/16 100.64.0.0/10
+mynetworks = 127.0.0.0/8 [::ffff:127.0.0.0]/104 [::1]/128
 relay_domains =
 
 # Configure for local delivery with a pipe to our webhook script
@@ -233,16 +233,16 @@ fi
 # Update transport maps
 postmap /etc/postfix/transport
 
-# Define default networks
-MYNETWORKS_DEFAULT="127.0.0.0/8 [::1]/128 172.16.0.0/12 10.0.0.0/8 192.168.0.0/16 100.64.0.0/10"
+# Define default localhost networks
+LOCALHOST_NETWORKS="127.0.0.0/8 [::ffff:127.0.0.0]/104 [::1]/128"
 
-# Use provided PUBLIC_IP if set, otherwise use just the defaults
-if [ -n "$PUBLIC_IP" ]; then
-    echo "Adding public IP to mynetworks: $PUBLIC_IP"
-    postconf -e "mynetworks = $MYNETWORKS_DEFAULT $PUBLIC_IP"
-else
-    echo "No PUBLIC_IP provided, using default networks only"
-    postconf -e "mynetworks = $MYNETWORKS_DEFAULT"
+# Start with localhost networks as absolute minimum
+MYNETWORKS="$LOCALHOST_NETWORKS"
+
+# If SUPPORTED_NETWORKS is provided, append those
+if [ -n "$SUPPORTED_NETWORKS" ]; then
+    echo "Adding additional networks to mynetworks: $SUPPORTED_NETWORKS"
+    MYNETWORKS="$MYNETWORKS $SUPPORTED_NETWORKS"
 fi
 
 # Apply the setting
