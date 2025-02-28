@@ -54,21 +54,23 @@ jobs:
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
           git push
 
-      - name: Notify new release
+      - name: Notify new version found
+        id: notify_new_version
         if: env.MODIFIED == 'true'
         uses: sarisia/actions-status-discord@v1
         with:
           webhook: ${{ secrets.DISCORD_WEBHOOK }}
           noprefix: true
-          status: success
-          title: "New Postfix Release Found!"
-          description: "A new version (v${{ env.NEW_VERSION }}) has been detected. The build-and-push workflow has been triggered."
-
+          status: ${{ job.status }}
+          title: ${{ github.workflow}} ${{ job.status }}
+          description: "A new Postfix version was found. The build and push workflow has been triggered."
+    
       - name: Notify failure
+        id: notify_failure
         if: failure()
         uses: sarisia/actions-status-discord@v1
         with:
           webhook: ${{ secrets.DISCORD_WEBHOOK }}
           noprefix: true
-          status: failure
-          title: "Postfix Release Check Failed"
+          status: ${{ job.status }}
+          title: "Postfix release check ${{ job.status }}"
