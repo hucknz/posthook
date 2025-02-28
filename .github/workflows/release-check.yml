@@ -43,7 +43,7 @@ jobs:
               -d '{"ref":"main"}'
             echo "MODIFIED=true" >> $GITHUB_ENV
 
-        - name: Commit latest version
+      - name: Commit latest version
         if: env.MODIFIED == 'true'
         run: |
           git config --global user.name "${GITHUB_ACTOR}"
