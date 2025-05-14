@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir apprise pyyaml
 
 # Copy app code
 COPY main.py /app/main.py
-COPY sendermap.yaml /app/sendermap.yaml
+COPY posthook.conf /app/posthook.conf
 
 WORKDIR /app
 
