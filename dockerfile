@@ -38,15 +38,15 @@ from email.parser import Parser
 from base64 import b64encode
 import configparser
 
+# Path to YAML config file
+YAML_CONFIG_PATH = '/etc/apprise/config.yml'
+
 # Load INI configuration from file (for backward compatibility)
 config = configparser.ConfigParser()
 config.read('/etc/postfix/apprise_config.ini')
 
 # Get notification URLs from configuration
 NOTIFICATION_URLS = config.get('apprise', 'urls', fallback='')
-
-# Path to YAML config file
-YAML_CONFIG_PATH = '/etc/apprise/config.yml'
 
 # Read email from stdin (piped from Postfix)
 message_data = sys.stdin.read()
@@ -63,6 +63,8 @@ email_data = {
     'headers': dict(message.items()),
     'body': {}
 }
+
+print(f"Processing email from: {email_data['from']}")
 
 # Process message body parts
 for part in message.walk():
@@ -118,6 +120,18 @@ title = f"Email: {email_data['subject']}"
 # Create an Apprise instance
 apobj = apprise.Apprise()
 
+# Function to extract email address from "Name <email>" format
+def get_email_address(from_string):
+    # Try to match "Name <email@example.com>" format
+    match = re.search(r'<([^>]+)>', from_string)
+    if match:
+        return match.group(1)
+    # If no angle brackets, assume it's just an email address
+    match = re.search(r'([^\s]+@[^\s]+)', from_string)
+    if match:
+        return match.group(1)
+    return from_string
+
 # Function to extract username from email address
 def get_username_from_email(email_address):
     match = re.match(r'^([^@]+)@', email_address)
@@ -125,26 +139,35 @@ def get_username_from_email(email_address):
         return match.group(1)
     return None
 
-# Check if a YAML config file exists and try to use it
+# Check if YAML config file exists
 yaml_config_exists = os.path.isfile(YAML_CONFIG_PATH)
 target_tag = None
 
 if yaml_config_exists:
     try:
+        print(f"Found YAML config at {YAML_CONFIG_PATH}")
         with open(YAML_CONFIG_PATH, 'r') as f:
-            yaml_config = yaml.safe_load(f)
-        
-        # Get the recipient address for tag matching
-        to_address = email_data['to']
+            yaml_content = f.read()
+            print(f"YAML content: {yaml_content}")
+            yaml_config = yaml.safe_load(yaml_content)
+            
+        # Get the sender address for tag matching
+        from_raw = email_data['from']
+        from_address = get_email_address(from_raw)
+        print(f"Extracted email address: {from_address} from {from_raw}")
         
         # First try exact match with the full email address
-        if to_address in yaml_config.get('configs', {}):
-            target_tag = to_address
+        if 'configs' in yaml_config and from_address in yaml_config.get('configs', {}):
+            target_tag = from_address
+            print(f"Found exact match for {from_address} in config")
         else:
             # Extract username from email and try to match that
-            username = get_username_from_email(to_address)
-            if username and username in yaml_config.get('configs', {}):
+            username = get_username_from_email(from_address)
+            if username and 'configs' in yaml_config and username in yaml_config.get('configs', {}):
                 target_tag = username
+                print(f"Found username match for {username} in config")
+            else:
+                print(f"No match found for {from_address} or {username} in config")
                 
         if target_tag:
             print(f"Using config tag: {target_tag}")
@@ -155,6 +178,7 @@ if yaml_config_exists:
             # Add all URLs for this tag
             if 'urls' in tag_config and isinstance(tag_config['urls'], list):
                 for url in tag_config['urls']:
+                    print(f"Adding URL: {url}")
                     apobj.add(url)
                     
             # Check for custom templates in the 'mailrise' section
@@ -184,12 +208,17 @@ if yaml_config_exists:
                 if 'body_format' in mailrise_config:
                     # This would be used with notify() but we're handling it as a template parameter
                     pass
+        else:
+            print(f"No matching configuration found in YAML")
             
     except Exception as e:
         print(f"Error processing YAML config: {str(e)}")
+        import traceback
+        traceback.print_exc()
 
 # If no servers were added from YAML, fall back to URLs from INI config
 if not apobj.servers and NOTIFICATION_URLS:
+    print(f"Falling back to INI config URLs: {NOTIFICATION_URLS}")
     for url in NOTIFICATION_URLS.split(','):
         url = url.strip()
         if url:
@@ -227,6 +256,7 @@ Date: {email_data['date']}
 """
 
 # Send the notification
+print(f"Sending notification with title: {title}")
 result = apobj.notify(
     body=message,
     title=title
@@ -353,6 +383,9 @@ COPY <<'EOT' /entrypoint.sh
 #!/bin/bash
 set -e
 
+# Create necessary directories
+mkdir -p /etc/apprise
+
 # Update apprise configuration
 if [ -n "$APPRISE_URLS" ]; then
     echo "Using Apprise URLs: $APPRISE_URLS"
@@ -366,6 +399,9 @@ fi
 if [ -f "/config/posthook.yml" ]; then
     echo "Found YAML config file, copying to /etc/apprise/config.yml"
     cp /config/posthook.yml /etc/apprise/config.yml
+    cat /etc/apprise/config.yml
+else
+    echo "WARNING: No config file found at /config/posthook.yml"
 fi
 
 # Update webhook fallback configuration if provided
