@@ -16,18 +16,18 @@ jobs:
 
       - name: Pull Docker image
         id: pull_latest_image
-        run: docker pull ubuntu:22.04
+        run: docker pull ubuntu:24.04
 
       - name: Get current hash
         id: get_current_hash
         run: |
-          CURRENT_HASH=$(docker save ubuntu:22.04 | tar -xO | shasum -a 256 | cut -d' ' -f1)
+          CURRENT_HASH=$(docker save ubuntu:24.04 | tar -xO | shasum -a 256 | cut -d' ' -f1)
           echo "CURRENT_HASH=$CURRENT_HASH" >> $GITHUB_ENV
 
       - name: Get previous hash
         id: get_previous_hash
         run: |
-          PREVIOUS_HASH=$(cat upstream-releases/ubuntu_hash.txt)
+          PREVIOUS_HASH=$(grep "baseimage_digest" .version | cut -d'=' -f2)
           echo "PREVIOUS_HASH=$PREVIOUS_HASH" >> $GITHUB_ENV
 
       - name: Compare hashes
@@ -39,8 +39,7 @@ jobs:
               echo "MODIFIED=false" >> $GITHUB_ENV
             else
               echo "Hashes differ. There's a change in the image."
-              echo "${{ env.CURRENT_HASH }}" > upstream-releases/ubuntu_hash.txt
-              # Trigger the build-and-push workflow
+              sed -i "s/^baseimage_digest=.*/baseimage_digest=${{ env.CURRENT_HASH }}/" .version
               curl -X POST \
               -H "Accept: application/vnd.github.v3+json" \
               -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
@@ -50,16 +49,17 @@ jobs:
             fi
           else
             echo "Previous hash not found. This is likely the first run."
-            echo "${{ env.CURRENT_HASH }}" > upstream-releases/ubuntu_hash.txt
+            sed -i "s/^baseimage_digest=.*/baseimage_digest=${{ env.CURRENT_HASH }}/" .version
+            echo "MODIFIED=true" >> $GITHUB_ENV
           fi
 
       - name: Commit latest version
+        id: commit_latest_version
         if: env.MODIFIED == 'true'
         run: |
-          git config --global user.name "${GITHUB_ACTOR}"
-          git config --global user.email "${GITHUB_ACTOR}@users.noreply.github.com"
-          git commit -am "New Postfix release found: ${{ env.NEW_VERSION }}"
-          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+          git config --global user.name 'hucknz'
+          git config --global user.email '12265772+hucknz@users.noreply.github.com'
+          git commit -am "New baseimage hash found"
           git push
 
       - name: Notify new image found
@@ -71,7 +71,7 @@ jobs:
           noprefix: true
           status: ${{ job.status }}
           title: ${{ github.workflow}} ${{ job.status }}
-          description: "A new Ubuntu base image was found. The build and push workflow has been triggered."
+          description: "A new base image was found. The build and push workflow has been triggered."
 
       - name: Notify failure
         if: failure()
@@ -80,4 +80,4 @@ jobs:
           webhook: ${{ secrets.DISCORD_WEBHOOK }}
           noprefix: true
           status: ${{ job.status }}
-          title: "Ubuntu base image check ${{ job.status }}"
+          title: "Base image check ${{ job.status }}"
