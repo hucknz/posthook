@@ -2,7 +2,7 @@ name: Check for new Postfix release
 
 on:
   schedule:
-    - cron: '15 3 * * *'  # Runs daily at 03:15 UTC
+    - cron: '15 3 * * *'
   workflow_dispatch:
 
 jobs:
@@ -14,44 +14,52 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Get current version number
+      - name: Get current version number from Debian repository
+        id: get_current_version
         run: |
-          CURRENT_VERSION=$(cat upstream-releases/postfix-latest.txt 2>/dev/null || echo "0.0.0")
+          RELEASE_VERSION=$(curl -sL "http://ftp.debian.org/debian/pool/main/p/postfix/")
+          CURRENT_VERSION=$(echo "$RELEASE_VERSION" | grep -oP 'postfix_\K[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -1)
           echo "CURRENT_VERSION=$CURRENT_VERSION" >> $GITHUB_ENV
 
-      - name: Get latest version number from Debian repository
+      - name: Get previous version
+        id: get_previous_version
         run: |
-          RELEASE_DATA=$(curl -sL "http://ftp.debian.org/debian/pool/main/p/postfix/")
-          NEW_VERSION=$(echo "$RELEASE_DATA" | grep -oP 'postfix_\K[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -1)
-          echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
+          PREVIOUS_VERSION=$(grep "postfix_version" .version | cut -d'=' -f2)
+          echo "PREVIOUS_VERSION=$PREVIOUS_VERSION" >> $GITHUB_ENV
 
-      - name: Compare version numbers
+      - name: Compare versions
+        id: compare_versions
         run: |
-          if [ -z "${{ env.NEW_VERSION }}" ] || [ "${{ env.NEW_VERSION }}" = "null" ]; then
+          if [ -z "${{ env.CURRENT_VERSION }}" ] || [ "${{ env.CURRENT_VERSION }}" = "null" ]; then
             echo "No valid new version found. Skipping update."
             echo "MODIFIED=false" >> $GITHUB_ENV
-          elif [ -n "${{ env.CURRENT_VERSION }}" ] && [ "${{ env.CURRENT_VERSION }}" = "${{ env.NEW_VERSION }}" ]; then
-            echo "Releases match. No change detected."
-            echo "MODIFIED=false" >> $GITHUB_ENV
+          elif [ -n "${{ env.PREVIOUS_VERSION }}" ]; then
+            if [ "${{ env.PREVIOUS_VERSION }}" = "${{ env.CURRENT_VERSION }}" ]; then
+              echo "Versions match. No change detected."
+              echo "MODIFIED=false" >> $GITHUB_ENV
+            else
+              echo "Versions differ. There has been a new release."
+              sed -i "s/^postfix_version=.*/postfix_version=${{ env.CURRENT_VERSION }}/" .version
+              curl -X POST \
+                -H "Accept: application/vnd.github.v3+json" \
+                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                https://api.github.com/repos/hucknz/posthook/actions/workflows/container-build-push.yml/dispatches \
+                -d '{"ref":"main"}'
+              echo "MODIFIED=true" >> $GITHUB_ENV
+            fi
           else
-            echo "Releases differ. There has been a new release."
-            echo "${{ env.NEW_VERSION }}" > upstream-releases/postfix-latest.txt
-            # Trigger the build-and-push workflow
-            curl -X POST \
-            -H "Accept: application/vnd.github.v3+json" \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            https://api.github.com/repos/hucknz/posthook/actions/workflows/container-build-push.yml/dispatches \
-            -d '{"ref":"main"}'
+            echo "Previous version not found. This is likely the first run."
+            sed -i "s/^postfix_version=.*/postfix_version=${{ env.CURRENT_VERSION }}/" .version
             echo "MODIFIED=true" >> $GITHUB_ENV
           fi
 
       - name: Commit latest version
+        id: commit_latest_version
         if: env.MODIFIED == 'true'
         run: |
-          git config --global user.name "${GITHUB_ACTOR}"
-          git config --global user.email "${GITHUB_ACTOR}@users.noreply.github.com"
-          git commit -am "New Postfix release found: ${{ env.NEW_VERSION }}"
-          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+          git config --global user.name 'hucknz'
+          git config --global user.email '12265772+hucknz@users.noreply.github.com'
+          git commit -am "New baseimage hash found"
           git push
 
       - name: Notify new version found
