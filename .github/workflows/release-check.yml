@@ -59,7 +59,7 @@ jobs:
         run: |
           git config --global user.name 'hucknz'
           git config --global user.email '12265772+hucknz@users.noreply.github.com'
-          git commit -am "New baseimage hash found"
+          git commit -am "New Postfix version found"
           git push
 
       - name: Notify new version found
